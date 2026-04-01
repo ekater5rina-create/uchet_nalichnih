@@ -1,473 +1,333 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Учет наличных средств</title>
+import React, { useState, useEffect } from 'react';
+
+// База сотрудников
+const USERS = {
+  "dmitriev": { password: "DAN", name: "Дмитриев А.Н.", companies: ["Kedress"] },
+  "kuzina": { password: "KEA", name: "Кузина Е. А.", companies: ["Kedress"] },
+  "matvienko": { password: "MEV", name: "Матвиенко Е.В.", companies: ["Kedress"] },
+  "prokofieva": { password: "PNV", name: "Прокофьева Н.В.", companies: ["Kedress"] },
+  "silin": { password: "SAI", name: "Силин А. И.", companies: ["Kedress"] },
+  "dolmatov": { password: "DYM", name: "Долматов Ю. М.", companies: ["Kedress", "Палладиум"] },
+  "anohin": { password: "AVM", name: "Анохин В.М.", companies: ["Палладиум"] },
+  "gorbunov": { password: "GVS", name: "Горбунов В. С.", companies: ["Палладиум"] },
+  "kochetkov": { password: "KAS", name: "Кочетков А. С.", companies: ["Палладиум"] },
+  "mezen": { password: "MTV", name: "Мезен Т.В.", companies: ["Палладиум"] },
+  "chintsov": { password: "CYA", name: "Чинцов Ю. А.", companies: ["Палладиум"] },
+  "shepilov": { password: "SAN", name: "Шепилов А.Н.", companies: ["Палладиум"] }
+};
+
+// Категории по компаниям
+const CATEGORIES_BY_COMPANY = {
+  "Kedress": [
+    "Содержание ПК", "Вклады от собственников", "Прочая продажа неликвида", 
+    "Зарплата производственного персонала", "Зарплата охраны", "Зарплата административного персонала", 
+    "Содержание офиса", "Представительские расходы", "Обслуживание линии", 
+    "Оплаты по кредитам и займам", "Командировачные расходы", "Доставка", "Автомобиль", "Упаковка и тара"
+  ],
+  "Палладиум": [
+    "Услуга по перевозке", "Прочие поступления", "Транспортные услуги", "РКО", 
+    "Зарплата производственного персонала", "Зарплата водителей", "Зарплата административного персонала", 
+    "Зарплата коммерческого персонала", "Обучение персонала", "Расходы на персонал", 
+    "Командировочные расходы", "Представительские расходы", "Поиск и найм персонала", 
+    "Маркетинговые расходы", "Аудит", "Обслуживание ПК", "Содержание офиса", 
+    "Связь, интернет, почтовые расходы", "Обслуживание 1С, ЭДО, сайт", "Автомобиль", 
+    "Аренда ПК", "Коммунальные ПК"
+  ]
+};
+
+const LOGOS = {
+  "Kedress": "https://i.yapx.ru/dPovS.png",
+  "Палладиум": "https://i.yapx.ru/dPLra.png"
+};
+
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJdXBKq_CqyAKfEtDTirnyg_kWMX-bX3IQ1h8U6s5LyVpfKiNUUM3yGfA_QxTaE7Yw/exec";
+
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loginData, setLoginData] = useState({ login: '', password: '' });
+  const [loginError, setLoginError] = useState('');
+  
+  const getToday = () => new Date().toISOString().split('T')[0];
+
+  const [formData, setFormData] = useState({
+    date: getToday(),
+    company: '',
+    employee: '',
+    type: 'Расход',
+    paymentMethod: 'Наличные',
+    category: '',
+    amount: '',
+    comment: '',
+    receiptName: '',
+    receiptBase64: '',
+    receiptType: ''
+  });
+
+  const [transactions, setTransactions] = useState([]);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const savedUserKey = localStorage.getItem('cashAppUser');
+    if (savedUserKey && USERS[savedUserKey]) {
+      const user = USERS[savedUserKey];
+      setCurrentUser(user);
+      const savedCompany = localStorage.getItem('cashAppCompany');
+      setFormData(prev => ({
+        ...prev,
+        company: (savedCompany && user.companies.includes(savedCompany)) ? savedCompany : user.companies[0],
+        employee: user.name
+      }));
+    }
+  }, []);
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (!loginData.login) return setLoginError('Выберите фамилию');
+    const user = USERS[loginData.login];
+    if (user && user.password === loginData.password) {
+      setCurrentUser(user);
+      localStorage.setItem('cashAppUser', loginData.login);
+      const comp = user.companies[0];
+      localStorage.setItem('cashAppCompany', comp);
+      setFormData(prev => ({ ...prev, company: comp, employee: user.name }));
+      setLoginError('');
+    } else {
+      setLoginError('Неверный пароль');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.clear();
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => {
+      if (name === 'company') {
+        localStorage.setItem('cashAppCompany', value);
+        return { ...prev, [name]: value, category: '' };
+      }
+      return { ...prev, [name]: value };
+    });
+    setError('');
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({ 
+          ...prev, 
+          receiptName: file.name,
+          receiptType: file.type,
+          receiptBase64: reader.result.split(',')[1]
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleEdit = (tx) => {
+    setFormData({
+      ...tx,
+      amount: Math.abs(tx.amount).toString(),
+      receiptName: '',
+      receiptBase64: '',
+      receiptType: ''
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setError('Режим исправления: отредактируйте данные и отправьте снова.');
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.category || !formData.amount || !formData.comment.trim()) {
+      return setError('Заполните обязательные поля');
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    const finalAmount = formData.type === 'Расход' ? -Math.abs(Number(formData.amount)) : Math.abs(Number(formData.amount));
     
-    <!-- Подключаем React и Tailwind прямо в браузере -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-50 font-sans text-slate-800">
-    <div id="root"></div>
+    const payload = {
+      ...formData,
+      employeeName: formData.employee,
+      amount: finalAmount,
+      file: formData.receiptBase64 ? {
+        base64: formData.receiptBase64,
+        type: formData.receiptType,
+        name: formData.receiptName
+      } : null
+    };
 
-    <script type="text/babel">
-        const { useState, useEffect } = React;
+    try {
+      const response = await fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
 
-        // БАЗА ДАННЫХ СОТРУДНИКОВ (Логины и пароли)
-        // Вы можете поменять пароли (password) на любые другие
-        const USERS = {
-            "dmitriev": { password: "DAN", name: "Дмитриев А.Н.", companies: ["Kedress"] },
-            "kuzina": { password: "KEA", name: "Кузина Е. А.", companies: ["Kedress"] },
-            "matvienko": { password: "MEV", name: "Матвиенко Е.В.", companies: ["Kedress"] },
-            "prokofieva": { password: "PNV", name: "Прокофьева Н.В.", companies: ["Kedress"] },
-            "silin": { password: "SAI", name: "Силин А. И.", companies: ["Kedress"] },
+      const dateParts = formData.date.split("-");
+      const displayDate = `${dateParts[2]}.${dateParts[1]}.${dateParts[0].slice(-2)}`;
+
+      const newTx = {
+        ...formData,
+        amount: finalAmount,
+        id: Date.now(),
+        displayDate: displayDate
+      };
+
+      setTransactions([newTx, ...transactions]);
+      setFormData(prev => ({ 
+        ...prev, 
+        amount: '', 
+        comment: '', 
+        category: '', 
+        receiptName: '', 
+        receiptBase64: '', 
+        date: getToday() 
+      }));
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err) {
+      setError('Ошибка отправки: ' + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-slate-100">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border p-8">
+          <h1 className="text-2xl font-bold text-center text-slate-800 mb-2">Авторизация</h1>
+          <p className="text-center text-slate-400 text-sm mb-8">Выберите сотрудника и введите пароль</p>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <select 
+              className="w-full p-4 border rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              onChange={(e) => setLoginData({...loginData, login: e.target.value})}
+              value={loginData.login}
+            >
+              <option value="">Кто заходит в базу?</option>
+              {Object.entries(USERS).sort((a,b)=>a[1].name.localeCompare(b[1].name)).map(([k,v]) => <option key={k} value={k}>{v.name}</option>)}
+            </select>
+            <input 
+              type="password" placeholder="Пароль" 
+              className="w-full p-4 border rounded-2xl outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+              value={loginData.password}
+            />
+            {loginError && <p className="text-red-500 text-xs font-bold px-2">{loginError}</p>}
+            <button className="w-full py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 transition-colors shadow-lg">Войти в систему</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto p-4 md:p-8">
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center gap-4">
+          <div className="h-10 w-10 flex items-center justify-center bg-white p-1 rounded-lg border shadow-sm">
+            <img src={LOGOS[formData.company]} className="max-h-full object-contain" alt="Logo" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-800">Учет финансов</h1>
+            <p className="text-xs text-slate-500 font-medium">{currentUser.name}</p>
+          </div>
+        </div>
+        <button onClick={handleLogout} className="text-xs font-bold text-slate-300 hover:text-red-500 uppercase tracking-widest transition-colors">Выйти</button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <form onSubmit={handleSubmit} className="lg:col-span-5 bg-white p-6 rounded-3xl border shadow-sm space-y-4">
+          
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 ml-1 tracking-wider">Дата операции</label>
+            <input 
+              type="date" 
+              name="date" 
+              value={formData.date} 
+              onChange={handleChange}
+              className="w-full p-3 border rounded-xl bg-slate-50 font-semibold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setFormData({...formData, type:'Приход'})} className={`py-3 rounded-2xl font-bold border-2 transition-all ${formData.type==='Приход' ? 'bg-green-50 border-green-500 text-green-700' : 'border-slate-100 text-slate-400'}`}>⬇ Приход</button>
+            <button type="button" onClick={() => setFormData({...formData, type:'Расход'})} className={`py-3 rounded-2xl font-bold border-2 transition-all ${formData.type==='Расход' ? 'bg-red-50 border-red-500 text-red-700' : 'border-slate-100 text-slate-400'}`}>⬆ Расход</button>
+          </div>
+
+          <div className="bg-slate-100 p-1 rounded-2xl grid grid-cols-2 gap-1">
+            <button type="button" onClick={() => setFormData({...formData, paymentMethod:'Наличные'})} className={`py-2 rounded-xl text-[10px] font-black uppercase transition-all ${formData.paymentMethod==='Наличные' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>💵 Наличные</button>
+            <button type="button" onClick={() => setFormData({...formData, paymentMethod:'Карта банка'})} className={`py-2 rounded-xl text-[10px] font-black uppercase transition-all ${formData.paymentMethod==='Карта банка' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>💳 Карта банка</button>
+          </div>
+
+          <div className="space-y-3">
+            <select name="company" value={formData.company} onChange={handleChange} className="w-full p-3 border rounded-xl bg-white font-medium" disabled={currentUser.companies.length===1}>
+              {currentUser.companies.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select name="category" value={formData.category} onChange={handleChange} className="w-full p-3 border rounded-xl bg-white">
+              <option value="">Статья расходов...</option>
+              {CATEGORIES_BY_COMPANY[formData.company]?.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+            <div className="relative">
+              <input type="number" name="amount" value={formData.amount} onChange={handleChange} placeholder="Сумма" className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg" />
+              <span className="absolute right-4 top-3.5 text-slate-400">₽</span>
+            </div>
+            <textarea name="comment" value={formData.comment} onChange={handleChange} placeholder="Комментарий..." className="w-full p-3 border rounded-xl h-24 resize-none outline-none focus:ring-2 focus:ring-blue-500 text-sm"></textarea>
             
-            // Долматов работает в двух компаниях
-            "dolmatov": { password: "DYM", name: "Долматов Ю. М.", companies: ["Kedress", "Палладиум"] },
+            <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
+              <span className="text-xs text-slate-500 font-medium">{formData.receiptName ? '📎 ' + formData.receiptName : '📷 Фото чека (если есть)'}</span>
+              <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
+            </label>
+          </div>
 
-            "gorbunov": { password: "GVS", name: "Горбунов В. С.", companies: ["Палладиум"] },
-            "kochetkov": { password: "KAS", name: "Кочетков А. С.", companies: ["Палладиум"] },
-            "mezen": { password: "MTV", name: "Мезен Т.В.", companies: ["Палладиум"] },
-            "chintsov": { password: "CYA", name: "Чинцов Ю. А.", companies: ["Палладиум"] },
-            "shepilov": { password: "SAN", name: "Шепилов А.Н.", companies: ["Палладиум"] }
-        };
+          {error && <p className="text-red-500 text-[10px] font-black uppercase text-center bg-red-50 py-2 rounded-lg">{error}</p>}
+          {success && <p className="text-green-600 text-xs font-bold text-center">✅ Данные внесены в таблицу!</p>}
 
-        const CATEGORIES_BY_COMPANY = {
-            "Kedress": [
-                "Содержание ПК", "Вклады от собственников", "Прочая продажа неликвида", 
-                "Зарплата производственного персонала", "Зарплата охраны", "Зарплата административного персонала", 
-                "Содержание офиса", "Представительские расходы", "Обслуживание линии", 
-                "Оплаты по кредитам и займам", "Командировачные расходы", "Доставка", "Автомобиль", "Упаковка и тара"
-            ],
-            "Палладиум": [
-                "Услуга по перевозке", "Прочие поступления", "Транспортные услуги", "РКО", 
-                "Зарплата производственного персонала", "Зарплата водителей", "Зарплата административного персонала", 
-                "Зарплата коммерческого персонала", "Обучение персонала", "Расходы на персонал", 
-                "Командировочные расходы", "Представительские расходы", "Поиск и найм персонала", 
-                "Маркетинговые расходы", "Аудит", "Обслуживание ПК", "Содержание офиса", 
-                "Связь, интернет, почтовые расходы", "Обслуживание 1С, ЭДО, сайт", "Автомобиль", 
-                "Аренда ПК", "Коммунальные ПК"
-            ]
-        };
+          <button disabled={isLoading} className="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl hover:bg-black transition-all disabled:opacity-50 shadow-lg">
+            {isLoading ? 'Отправка...' : 'Записать операцию'}
+          </button>
+        </form>
 
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJdXBKq_CqyAKfEtDTirnyg_kWMX-bX3IQ1h8U6s5LyVpfKiNUUM3yGfA_QxTaE7Yw/exec";
-
-        const LOGOS = {
-            "Kedress": "https://i.yapx.ru/dPovS.png",
-            "Палладиум": "https://i.yapx.ru/dPLra.png"
-        };
-
-        function App() {
-            const [currentUser, setCurrentUser] = useState(null);
-            
-            // Состояние формы авторизации
-            const [loginData, setLoginData] = useState({ login: '', password: '' });
-            const [loginError, setLoginError] = useState('');
-
-            // Состояние основной формы
-            const [formData, setFormData] = useState({
-                company: '',
-                employee: '',
-                type: 'Расход',
-                category: '',
-                amount: '',
-                comment: '',
-                receiptName: '',
-                receiptBase64: '',
-                receiptType: ''
-            });
-
-            const [transactions, setTransactions] = useState([]);
-            const [error, setError] = useState('');
-            const [success, setSuccess] = useState(false);
-            const [isLoading, setIsLoading] = useState(false);
-
-            // Проверка сохраненной сессии при загрузке страницы
-            useEffect(() => {
-                const savedUserKey = localStorage.getItem('cashAppUser');
-                if (savedUserKey && USERS[savedUserKey]) {
-                    const user = USERS[savedUserKey];
-                    setCurrentUser(user);
-                    
-                    // Восстанавливаем последнюю выбранную компанию или берем первую доступную
-                    const savedCompany = localStorage.getItem('cashAppCompany');
-                    const initialCompany = (savedCompany && user.companies.includes(savedCompany)) 
-                        ? savedCompany 
-                        : user.companies[0];
-
-                    setFormData(prev => ({
-                        ...prev,
-                        company: initialCompany,
-                        employee: user.name,
-                        category: ''
-                    }));
-                }
-            }, []);
-
-            // Обработка входа в систему
-            const handleLoginSubmit = (e) => {
-                e.preventDefault();
-                
-                if (!loginData.login) {
-                    setLoginError('Пожалуйста, выберите сотрудника из списка');
-                    return;
-                }
-
-                const loginKey = loginData.login;
-                const user = USERS[loginKey];
-
-                if (user && user.password === loginData.password) {
-                    setCurrentUser(user);
-                    setLoginError('');
-                    
-                    // Сохраняем логин в память браузера
-                    localStorage.setItem('cashAppUser', loginKey);
-                    
-                    const initialCompany = user.companies[0];
-                    localStorage.setItem('cashAppCompany', initialCompany);
-
-                    // Предзаполняем форму данными пользователя
-                    setFormData(prev => ({
-                        ...prev,
-                        company: initialCompany, // Выбираем первую доступную компанию по умолчанию
-                        employee: user.name,
-                        category: ''
-                    }));
-                } else {
-                    setLoginError('Неверный пароль');
-                }
-            };
-
-            const handleLogout = () => {
-                setCurrentUser(null);
-                
-                // Удаляем данные из памяти браузера при выходе
-                localStorage.removeItem('cashAppUser');
-                localStorage.removeItem('cashAppCompany');
-
-                setLoginData({ login: '', password: '' });
-                setFormData({
-                    company: '', employee: '', type: 'Расход', category: '',
-                    amount: '', comment: '', receiptName: '', receiptBase64: '', receiptType: ''
-                });
-            };
-
-            const handleChange = (e) => {
-                const { name, value } = e.target;
-                setFormData(prev => {
-                    const newData = { ...prev, [name]: value };
-                    // Сбрасываем только статью расходов, сотрудника больше не трогаем (он фиксированный)
-                    if (name === 'company') {
-                        newData.category = '';
-                        localStorage.setItem('cashAppCompany', value); // Запоминаем выбранную компанию
-                    }
-                    return newData;
-                });
-                setError('');
-                setSuccess(false);
-            };
-
-            const handleFileChange = (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = () => {
-                        const base64String = reader.result.split(',')[1];
-                        setFormData(prev => ({ 
-                            ...prev, 
-                            receiptName: file.name,
-                            receiptType: file.type,
-                            receiptBase64: base64String
-                        }));
-                    };
-                    reader.readAsDataURL(file);
-                }
-            };
-
-            const handleSubmit = async (e) => {
-                e.preventDefault();
-                
-                if (!formData.company) return setError('Выберите компанию');
-                if (!formData.employee) return setError('Проблема с определением сотрудника');
-                if (!formData.category) return setError('Выберите статью расходов');
-                if (!formData.amount || formData.amount <= 0) return setError('Введите корректную сумму');
-                if (!formData.comment.trim()) return setError('Комментарий обязателен для заполнения');
-
-                setIsLoading(true);
-                setError('');
-
-                const payloadAmount = formData.type === 'Расход' ? -Math.abs(Number(formData.amount)) : Math.abs(Number(formData.amount));
-                
-                const payload = {
-                    company: formData.company,
-                    employeeName: formData.employee,
-                    amount: payloadAmount,
-                    category: formData.category,
-                    comment: formData.comment,
-                    file: formData.receiptBase64 ? {
-                        base64: formData.receiptBase64,
-                        type: formData.receiptType,
-                        name: formData.receiptName
-                    } : null
-                };
-
-                try {
-                    await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const newTransaction = {
-                        ...formData,
-                        id: Date.now(),
-                        date: new Date().toLocaleString('ru-RU', { 
-                            day: '2-digit', month: '2-digit', year: 'numeric', 
-                            hour: '2-digit', minute: '2-digit' 
-                        })
-                    };
-
-                    setTransactions([newTransaction, ...transactions]);
-                    
-                    // Сбрасываем поля формы после успеха
-                    setFormData(prev => ({
-                        ...prev,
-                        type: 'Расход',
-                        category: '',
-                        amount: '',
-                        comment: '',
-                        receiptName: '',
-                        receiptBase64: '',
-                        receiptType: ''
-                    }));
-                    
-                    const fileInput = document.getElementById('receipt-upload');
-                    if (fileInput) fileInput.value = '';
-
-                    setSuccess(true);
-                    setTimeout(() => setSuccess(false), 3000);
-                } catch (err) {
-                    setError('Ошибка отправки. Подробности: ' + err.message);
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            // Экран авторизации, если пользователь не вошел
-            if (!currentUser) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-                        <div className="max-w-md w-full bg-white rounded-2xl shadow-md border border-slate-200 p-8">
-                            <div className="text-center mb-8">
-                                <h1 className="text-2xl font-bold text-slate-800">Авторизация</h1>
-                                <p className="text-slate-500 mt-2">Выберите себя в списке и введите пароль</p>
-                            </div>
-                            
-                            <form onSubmit={handleLoginSubmit} className="space-y-5">
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">Сотрудник</label>
-                                    <select 
-                                        value={loginData.login}
-                                        onChange={(e) => setLoginData({...loginData, login: e.target.value})}
-                                        className="w-full p-3 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value="" disabled>Выберите сотрудника...</option>
-                                        {Object.entries(USERS)
-                                            .sort((a, b) => a[1].name.localeCompare(b[1].name))
-                                            .map(([key, user]) => (
-                                                <option key={key} value={key}>{user.name}</option>
-                                            ))
-                                        }
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">Пароль</label>
-                                    <input 
-                                        type="password" 
-                                        value={loginData.password}
-                                        onChange={(e) => setLoginData({...loginData, password: e.target.value})}
-                                        className="w-full p-3 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                        placeholder="••••••"
-                                    />
-                                </div>
-
-                                {loginError && <div className="p-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-medium">{loginError}</div>}
-
-                                <button type="submit" className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm hover:shadow transition-all mt-4">
-                                    Войти
-                                </button>
-                            </form>
-                        </div>
+        <div className="lg:col-span-7 space-y-4">
+          <h2 className="font-bold text-xs text-slate-300 uppercase tracking-widest flex items-center gap-2">🧾 Лента документов</h2>
+          <div className="space-y-3 max-h-[750px] overflow-y-auto pr-2 custom-scrollbar">
+            {transactions.length === 0 ? (
+              <div className="bg-white p-12 rounded-3xl border border-dashed flex flex-col items-center justify-center text-slate-200">
+                <p className="text-sm font-medium">Ваши новые записи появятся здесь</p>
+              </div>
+            ) : (
+              transactions.map(tx => (
+                <div key={tx.id} className="bg-white p-4 rounded-2xl border shadow-sm flex justify-between items-start animate-fade-in">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-tighter ${tx.type==='Приход' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{tx.type}</span>
+                      <span className="text-[10px] font-bold text-slate-400">{tx.displayDate}</span>
+                      <span className="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded uppercase">{tx.paymentMethod}</span>
                     </div>
-                );
-            }
-
-            // Основной экран приложения (если авторизация пройдена)
-            return (
-                <div className="min-h-screen p-4 md:p-8 relative">
-                    {/* Кнопка выхода в правом верхнем углу */}
-                    <button 
-                        onClick={handleLogout}
-                        className="absolute top-4 right-4 md:top-8 md:right-8 bg-white border border-slate-300 text-slate-600 hover:bg-slate-100 px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm"
-                    >
-                        Выйти из системы
-                    </button>
-
-                    <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 mt-12 md:mt-0">
-                        {/* Форма */}
-                        <div className="lg:col-span-5 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
-                            <div className="flex flex-col items-center mb-8">
-                                <div className="h-24 w-full flex items-center justify-center mb-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                                    {formData.company ? (
-                                        <img src={LOGOS[formData.company]} alt={`Логотип`} className="max-h-full max-w-full object-contain" />
-                                    ) : (
-                                        <span className="text-slate-400 font-medium">Логотип компании</span>
-                                    )}
-                                </div>
-                                <h2 className="text-xl font-bold text-slate-800">Учет наличных средств</h2>
-                                <p className="text-sm text-slate-500">Сотрудник: {currentUser.name}</p>
-                            </div>
-
-                            <form onSubmit={handleSubmit} className="space-y-5">
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">🏢 Компания <span className="text-red-500">*</span></label>
-                                    <select 
-                                        name="company" 
-                                        value={formData.company} 
-                                        onChange={handleChange} 
-                                        className="w-full p-3 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                        disabled={currentUser.companies.length === 1} // Блокируем, если доступна только одна компания
-                                    >
-                                        {currentUser.companies.map(comp => (
-                                            <option key={comp} value={comp}>{comp}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">👤 Сотрудник <span className="text-slate-400 font-normal">(заполняется автоматически)</span></label>
-                                    <input 
-                                        type="text" 
-                                        value={formData.employee} 
-                                        disabled
-                                        className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-500 font-medium outline-none cursor-not-allowed"
-                                    />
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-2">Тип операции <span className="text-red-500">*</span></label>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <label className={`flex items-center justify-center p-3 rounded-xl border cursor-pointer ${formData.type === 'Приход' ? 'bg-green-50 border-green-500 text-green-700 ring-1 ring-green-500' : 'bg-white text-slate-600'}`}>
-                                            <input type="radio" name="type" value="Приход" checked={formData.type === 'Приход'} onChange={handleChange} className="sr-only" />
-                                            ⬇️ Приход
-                                        </label>
-                                        <label className={`flex items-center justify-center p-3 rounded-xl border cursor-pointer ${formData.type === 'Расход' ? 'bg-red-50 border-red-500 text-red-700 ring-1 ring-red-500' : 'bg-white text-slate-600'}`}>
-                                            <input type="radio" name="type" value="Расход" checked={formData.type === 'Расход'} onChange={handleChange} className="sr-only" />
-                                            ⬆️ Расход
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">🏷️ Статья расходов <span className="text-red-500">*</span></label>
-                                    <select name="category" value={formData.category} onChange={handleChange} className="w-full p-3 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                        <option value="" disabled>Выберите статью...</option>
-                                        {CATEGORIES_BY_COMPANY[formData.company]?.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">Сумма (₽) <span className="text-red-500">*</span></label>
-                                    <div className="relative">
-                                        <input type="number" name="amount" value={formData.amount} onChange={handleChange} placeholder="0.00" min="0" step="0.01" className="w-full p-3 pl-4 pr-12 text-lg font-medium border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                                        <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-slate-400 font-medium">₽</div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">📄 Комментарий <span className="text-red-500">*</span></label>
-                                    <textarea name="comment" value={formData.comment} onChange={handleChange} placeholder="Укажите назначение платежа..." rows="3" className="w-full p-3 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"></textarea>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-semibold mb-1">📷 Прикрепить чек</label>
-                                    <label className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-50 text-slate-500">
-                                        <span className="text-sm font-medium">{formData.receiptName ? '📎 ' + formData.receiptName : 'Нажмите, чтобы загрузить файл'}</span>
-                                        <input id="receipt-upload" type="file" className="hidden" accept="image/*,.pdf" onChange={handleFileChange} />
-                                    </label>
-                                </div>
-
-                                {error && <div className="p-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-medium">{error}</div>}
-                                {success && <div className="p-3 bg-green-50 text-green-700 border border-green-200 rounded-xl text-sm font-medium">✅ Запись успешно добавлена!</div>}
-
-                                <button type="submit" disabled={isLoading} className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold rounded-xl shadow-sm hover:shadow transition-all flex items-center justify-center gap-2">
-                                    {isLoading ? '⏳ Отправка...' : '➕ Записать операцию'}
-                                </button>
-                            </form>
-                        </div>
-
-                        {/* История */}
-                        <div className="lg:col-span-7 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[800px]">
-                            <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                                <h3 className="text-lg font-bold text-slate-800">🧾 Ваши последние операции</h3>
-                            </div>
-                            
-                            <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-                                {transactions.filter(t => t.employee === currentUser.name).length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center">
-                                        <p>Здесь будут отображаться ваши добавленные записи</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        {transactions.filter(t => t.employee === currentUser.name).map((t) => (
-                                            <div key={t.id} className="p-4 sm:p-5 border border-slate-100 rounded-xl bg-white shadow-sm">
-                                                <div className="flex justify-between items-start mb-3 gap-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center p-1.5 border border-slate-200 shrink-0">
-                                                            <img src={LOGOS[t.company]} alt={t.company} className="max-h-full max-w-full object-contain"/>
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-bold text-slate-800">{t.employee}</p>
-                                                            <p className="text-xs text-slate-500">{t.date} • {t.company}</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className={`px-3 py-1 rounded-full text-sm font-bold flex items-center gap-1 shrink-0 ${t.type === 'Приход' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                        {t.type === 'Приход' ? '+' : '-'}{Number(t.amount).toLocaleString('ru-RU')} ₽
-                                                    </div>
-                                                </div>
-                                                
-                                                <div className="mb-2">
-                                                    <span className="inline-block px-2 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-md">{t.category}</span>
-                                                </div>
-
-                                                <div className="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                                                    <span className="font-semibold block mb-1">Комментарий:</span>
-                                                    {t.comment}
-                                                </div>
-
-                                                {t.receiptName && (
-                                                    <div className="mt-3 flex items-center gap-2 text-xs text-blue-600">
-                                                        📷 Чек прикреплен: {t.receiptName}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
+                    <p className="font-bold text-slate-800 text-lg">{Number(tx.amount).toLocaleString('ru-RU')} ₽</p>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-tight">{tx.category}</p>
+                    <div className="bg-slate-50 p-2 rounded-lg mt-2 border-l-2 border-slate-200">
+                      <p className="text-sm text-slate-600 italic">"{tx.comment}"</p>
                     </div>
+                  </div>
+                  <button onClick={() => handleEdit(tx)} className="p-2 hover:bg-slate-100 rounded-lg text-blue-500 transition-colors" title="Исправить ошибку">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                  </button>
                 </div>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
