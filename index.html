@@ -26,7 +26,6 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // ВАЖНО: Убедитесь, что эта ссылка совпадает с той, что вы получили после "Нового развертывания" в Google
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJdXBKq_CqyAKfEtDTirnyg_kWMX-bX3IQ1h8U6s5LyVpfKiNUUM3yGfA_QxTaE7Yw/exec";
         
         const USERS = {
@@ -105,9 +104,8 @@
                 const selectedFiles = Array.from(e.target.files);
                 if (selectedFiles.length === 0) return;
                 
-                setMsg({ text: 'Обработка фото...', type: 'ok' });
+                setMsg({ text: 'Обработка файлов...', type: 'ok' });
                 
-                // Обработка нескольких файлов параллельно
                 const filePromises = selectedFiles.map(f => {
                     return new Promise((resolve) => {
                         const r = new FileReader();
@@ -139,7 +137,7 @@
                     category: form.cat,
                     paymentMethod: form.pay,
                     comment: form.note,
-                    files: form.files // Отправляем весь массив файлов
+                    files: form.files 
                 };
 
                 try {
@@ -184,7 +182,7 @@
             if (!user) return (
                 <div className="min-h-screen flex items-center justify-center p-6">
                     <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-                        <h1 className="text-2xl font-black text-center mb-8 uppercase tracking-tighter">Вход в систему</h1>
+                        <h1 className="text-2xl font-black text-center mb-8 uppercase tracking-tighter text-slate-800">Вход в систему</h1>
                         <form onSubmit={handleLogin} className="space-y-4">
                             <select className="w-full p-4 border rounded-2xl outline-none bg-slate-50 font-bold" onChange={e => setLogin({...login, id: e.target.value})}>
                                 <option value="">Сотрудник...</option>
@@ -202,9 +200,9 @@
                     <div className="flex justify-between items-center mb-8">
                         <div className="flex items-center gap-4">
                             <div className="bg-white p-1 rounded-xl shadow-sm border h-14 w-14 flex items-center justify-center"><img src={LOGOS[form.company]} className="max-h-full object-contain" /></div>
-                            <div><h1 className="text-xl font-black uppercase leading-none">Касса</h1><p className="text-[10px] text-slate-400 font-black uppercase mt-1 tracking-widest">{user.name}</p></div>
+                            <div><h1 className="text-xl font-black uppercase leading-none text-slate-800">Касса</h1><p className="text-[10px] text-slate-400 font-black uppercase mt-1 tracking-widest">{user.name}</p></div>
                         </div>
-                        <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-[10px] font-black text-slate-300 hover:text-red-500 uppercase tracking-widest">Выход</button>
+                        <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-[10px] font-black text-slate-300 hover:text-red-500 uppercase tracking-widest transition-colors">Выход</button>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -236,11 +234,15 @@
                                 </div>
                                 <textarea value={form.note} onChange={e => setForm({...form, note: e.target.value})} placeholder="Комментарий..." className="w-full p-3 border border-slate-100 rounded-xl h-24 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium"></textarea>
                                 
-                                <label className="flex items-center justify-center p-4 border-2 border-dashed border-slate-100 rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
-                                    <span className="text-[10px] text-slate-400 font-black uppercase text-center">
-                                        {form.files.length > 0 ? `📎 Выбрано фото: ${form.files.length}` : (form.photoUrl && form.photoUrl !== "Без фото" ? '📎 Фото сохранены (нажмите для замены)' : '📷 Прикрепить чеки (можно несколько)')}
-                                    </span>
-                                    <input type="file" multiple className="hidden" accept="image/*" onChange={handleFile} />
+                                <label className="flex items-center justify-center p-4 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
+                                    <div className="flex flex-col items-center gap-1">
+                                        <span className="text-[10px] text-slate-400 font-black uppercase text-center">
+                                            {form.files.length > 0 ? `📎 Выбрано файлов: ${form.files.length}` : (form.photoUrl && form.photoUrl !== "Без фото" ? '📎 Файлы сохранены (нажмите для замены)' : '📎 Прикрепить чеки или PDF')}
+                                        </span>
+                                        <span className="text-[8px] text-slate-300 font-bold uppercase tracking-wider">(можно несколько разных типов)</span>
+                                    </div>
+                                    {/* Убрали ограничение accept="image/*", теперь можно PDF и всё остальное */}
+                                    <input type="file" multiple className="hidden" onChange={handleFile} />
                                 </label>
                             </div>
 
@@ -271,9 +273,14 @@
                                             
                                             {tx.photoUrl && tx.photoUrl !== "Без фото" && (
                                                 <div className="flex flex-wrap gap-2 mt-2">
-                                                    {tx.photoUrl.split(',').map((url, idx) => (
-                                                        <a key={idx} href={url.trim()} target="_blank" rel="noopener noreferrer" className="inline-block text-[9px] font-black text-blue-400 uppercase bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">📎 Чек {idx + 1}</a>
-                                                    ))}
+                                                    {tx.photoUrl.split(',').map((url, idx) => {
+                                                        const isPdf = url.toLowerCase().includes('.pdf') || url.includes('drive.google.com'); // Упрощенная проверка
+                                                        return (
+                                                            <a key={idx} href={url.trim()} target="_blank" rel="noopener noreferrer" className="inline-block text-[9px] font-black text-blue-400 uppercase bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
+                                                                📎 {isPdf ? 'Файл' : 'Чек'} {idx + 1}
+                                                            </a>
+                                                        );
+                                                    })}
                                                 </div>
                                             )}
                                         </div>
