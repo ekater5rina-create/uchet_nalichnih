@@ -32,7 +32,7 @@
             "Прокофьева Н.В.": 109220.64,
             "Горбунов В. С.": 92098.00
         };
-        const CUTOFF_DATE = new Date(2026, 3, 30); // 30 апреля 2026 (месяцы с 0)
+        const CUTOFF_DATE = new Date(2026, 3, 30); // 30 апреля 2026
 
         const USERS = {
             "dmitriev": { password: "DAN", name: "Дмитриев А.Н.", companies: ["Kedress"] },
@@ -87,9 +87,11 @@
                     const data = await r.json();
                     setHistory(data);
                     
+                    const now = new Date();
+                    const currentMonthStr = `${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear()).slice(-2)}`;
+                    
                     if (!selectedMonth) {
-                        const now = new Date();
-                        setSelectedMonth(`${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear()).slice(-2)}`);
+                        setSelectedMonth(currentMonthStr);
                     }
                 } catch (e) { console.error(e); }
                 setIsSyncing(false);
@@ -176,7 +178,8 @@
                     amount: form.type === 'Расход' ? -Math.abs(form.sum) : Math.abs(form.sum),
                     paymentMethod: form.pay, 
                     comment: form.note, 
-                    category: form.cat
+                    category: form.cat,
+                    files: form.files
                 };
                 try {
                     await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
@@ -229,13 +232,13 @@
                         <div className="flex flex-wrap gap-2">
                             {(user.name === "Прокофьева Н.В." || user.name === "Долматов Ю. М.") && (
                                 <div className="bg-white px-4 py-2 rounded-2xl border border-blue-50 shadow-sm">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Остаток Прокофьева</p>
+                                    <p className="text-[8px] font-black text-slate-400 uppercase">Касса Прокофьева</p>
                                     <p className="text-sm font-black text-blue-600">{calculatedBalances["Прокофьева Н.В."].toLocaleString('ru-RU')} ₽</p>
                                 </div>
                             )}
                             {(user.name === "Горбунов В. С." || user.name === "Долматов Ю. М.") && (
                                 <div className="bg-white px-4 py-2 rounded-2xl border border-blue-50 shadow-sm">
-                                    <p className="text-[8px] font-black text-slate-400 uppercase">Остаток Горбунов</p>
+                                    <p className="text-[8px] font-black text-slate-400 uppercase">Касса Горбунов</p>
                                     <p className="text-sm font-black text-blue-600">{calculatedBalances["Горбунов В. С."].toLocaleString('ru-RU')} ₽</p>
                                 </div>
                             )}
