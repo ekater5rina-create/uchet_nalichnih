@@ -4,19 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Учет наличных средств</title>
-    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background: #f8fafc; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .loading-pulse { animation: pulse 1.5s infinite ease-in-out; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .active-tab { background: white; color: #2563eb; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border-color: #2563eb; }
         input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); }
     </style>
 </head>
@@ -24,10 +23,17 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
 
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJdXBKq_CqyAKfEtDTirnyg_kWMX-bX3IQ1h8U6s5LyVpfKiNUUM3yGfA_QxTaE7Yw/exec";
         
+        // --- КОНФИГУРАЦИЯ ОСТАТКОВ ---
+        const INITIAL_BALANCES = {
+            "Прокофьева Н.В.": 109220.64,
+            "Горбунов В. С.": 92098.00
+        };
+        const CUTOFF_DATE = new Date(2026, 3, 30); // 30 апреля 2026 (месяцы с 0)
+
         const USERS = {
             "dmitriev": { password: "DAN", name: "Дмитриев А.Н.", companies: ["Kedress"] },
             "kuzina": { password: "KEA", name: "Кузина Е. А.", companies: ["Kedress"] },
@@ -36,7 +42,6 @@
             "silin": { password: "SAI", name: "Силин А. И.", companies: ["Kedress"] },
             "dolmatov": { password: "DYM", name: "Долматов Ю. М.", companies: ["Kedress", "Палладиум"] },
             "anohin": { password: "AVM", name: "Анохин В.М.", companies: ["Палладиум"] },
-             "zalazaev": { password: "ZVV", name: "Залазаев В.В.", companies: ["Палладиум"] },
             "gorbunov": { password: "GVS", name: "Горбунов В. С.", companies: ["Палладиум"] },
             "kochetkov": { password: "KAS", name: "Кочетков А. С.", companies: ["Палладиум"] },
             "mezen": { password: "MTV", name: "Мезен Т.В.", companies: ["Палладиум"] },
@@ -55,39 +60,86 @@
             const [user, setUser] = useState(null);
             const [login, setLogin] = useState({ id: '', pass: '' });
             const [isLoading, setIsLoading] = useState(true);
+            const [history, setHistory] = useState([]);
+            const [selectedMonth, setSelectedMonth] = useState(""); 
             const [isSyncing, setIsSyncing] = useState(false);
-            const [isSubmitting, setIsSubmitting] = useState(false);
             
             const getToday = () => new Date().toISOString().split('T')[0];
             const [form, setForm] = useState({ id: null, date: getToday(), company: '', type: 'Расход', pay: 'Наличные', cat: '', sum: '', note: '', files: [], photoUrl: '' });
-            const [history, setHistory] = useState([]);
             const [msg, setMsg] = useState({ text: '', type: '' });
+            const [isSubmitting, setIsSubmitting] = useState(false);
 
             useEffect(() => {
                 const saved = localStorage.getItem('cash_user');
                 if (saved && USERS[saved]) {
                     const u = USERS[saved];
                     setUser(u);
-                    const comp = localStorage.getItem('cash_comp') || u.companies[0];
-                    setForm(f => ({ ...f, company: comp, employee: u.name }));
-                    const cache = localStorage.getItem(`hist_${saved}`);
-                    if (cache) setHistory(JSON.parse(cache));
-                    loadHistory(saved, u.name);
+                    setForm(f => ({ ...f, company: u.companies[0] }));
+                    loadHistory();
                 }
                 setIsLoading(false);
             }, []);
 
-            const loadHistory = async (userKey, name) => {
+            const loadHistory = async () => {
                 setIsSyncing(true);
                 try {
                     const r = await fetch(GOOGLE_SCRIPT_URL);
                     const data = await r.json();
-                    const filtered = data.filter(t => t.employeeName === name);
-                    setHistory(filtered);
-                    localStorage.setItem(`hist_${userKey}`, JSON.stringify(filtered));
-                } catch (e) { console.error("Ошибка загрузки истории", e); }
+                    setHistory(data);
+                    
+                    if (!selectedMonth) {
+                        const now = new Date();
+                        setSelectedMonth(`${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear()).slice(-2)}`);
+                    }
+                } catch (e) { console.error(e); }
                 setIsSyncing(false);
             };
+
+            // Расчет балансов
+            const calculatedBalances = useMemo(() => {
+                const calc = (name) => {
+                    const start = INITIAL_BALANCES[name] || 0;
+                    const ops = history.filter(tx => {
+                        if (tx.employeeName !== name || tx.paymentMethod !== "Наличные") return false;
+                        const [d, m, y] = tx.date.split('.');
+                        const txDate = new Date(2000 + parseInt(y), parseInt(m) - 1, parseInt(d));
+                        return txDate > CUTOFF_DATE;
+                    });
+                    const delta = ops.reduce((acc, tx) => acc + parseFloat(tx.amount), 0);
+                    return start + delta;
+                };
+                return {
+                    "Прокофьева Н.В.": calc("Прокофьева Н.В."),
+                    "Горбунов В. С.": calc("Горбунов В. С.")
+                };
+            }, [history]);
+
+            // Список доступных месяцев для вкладок
+            const monthTabs = useMemo(() => {
+                const months = new Set();
+                const now = new Date();
+                // Всегда добавляем текущий месяц
+                months.add(`${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear()).slice(-2)}`);
+                history.forEach(tx => {
+                    const p = tx.date.split('.');
+                    if (p.length === 3) months.add(`${p[1]}.${p[2]}`);
+                });
+                return Array.from(months).sort((a,b) => {
+                    const [m1, y1] = a.split('.'); const [m2, y2] = b.split('.');
+                    const sortA = y1 + m1;
+                    const sortB = y2 + m2;
+                    return sortB.localeCompare(sortA); // Сортировка по убыванию
+                });
+            }, [history]);
+
+            // Фильтрация истории для отображения в ленте
+            const currentList = useMemo(() => {
+                return history.filter(tx => {
+                    const matchUser = user.name === "Долматов Ю. М." || tx.employeeName === user.name;
+                    const matchMonth = tx.date.includes(`.${selectedMonth}`);
+                    return matchUser && matchMonth;
+                });
+            }, [history, selectedMonth, user]);
 
             const handleLogin = (e) => {
                 e.preventDefault();
@@ -95,173 +147,174 @@
                 if (u && u.password === login.pass) {
                     setUser(u);
                     localStorage.setItem('cash_user', login.id);
-                    localStorage.setItem('cash_comp', u.companies[0]);
-                    setForm(f => ({ ...f, company: u.companies[0], employee: u.name }));
-                    loadHistory(login.id, u.name);
-                } else { setMsg({ text: 'Неверный логин или пароль', type: 'err' }); }
+                    setForm(f => ({ ...f, company: u.companies[0] }));
+                    loadHistory();
+                } else { setMsg({ text: 'Ошибка входа', type: 'err' }); }
             };
 
             const handleFile = async (e) => {
-                const selectedFiles = Array.from(e.target.files);
-                if (selectedFiles.length === 0) return;
-                
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
                 setMsg({ text: 'Обработка файлов...', type: 'ok' });
-                
-                const filePromises = selectedFiles.map(f => {
-                    return new Promise((resolve) => {
-                        const r = new FileReader();
-                        r.onloadend = () => resolve({
-                            base64: r.result.split(',')[1],
-                            type: f.type,
-                            name: f.name
-                        });
-                        r.readAsDataURL(f);
-                    });
-                });
-
-                const processedFiles = await Promise.all(filePromises);
-                setForm(prev => ({ ...prev, files: processedFiles }));
+                const promises = files.map(f => new Promise(res => {
+                    const r = new FileReader();
+                    r.onloadend = () => res({ base64: r.result.split(',')[1], type: f.type, name: f.name });
+                    r.readAsDataURL(f);
+                }));
+                const res = await Promise.all(promises);
+                setForm(f => ({ ...f, files: res }));
                 setMsg({ text: '', type: '' });
             };
 
             const onSubmit = async (e) => {
                 e.preventDefault();
-                if (!form.cat || !form.sum || !form.note.trim()) return setMsg({ text: 'Заполните все поля', type: 'err' });
-                
+                if (!form.cat || !form.sum || !form.note.trim()) return setMsg({ text: 'Заполните поля', type: 'err' });
                 setIsSubmitting(true);
-                setMsg({ text: '', type: '' });
-
                 const payload = {
                     ...form,
                     employeeName: user.name,
                     amount: form.type === 'Расход' ? -Math.abs(form.sum) : Math.abs(form.sum),
-                    category: form.cat,
-                    paymentMethod: form.pay,
-                    comment: form.note,
-                    files: form.files 
+                    paymentMethod: form.pay, 
+                    comment: form.note, 
+                    category: form.cat
                 };
-
                 try {
-                    const response = await fetch(GOOGLE_SCRIPT_URL, { 
-                      method: 'POST', 
-                      body: JSON.stringify(payload) 
-                    });
-                    
-                    if (response.ok) {
-                      setMsg({ text: 'Данные успешно сохранены!', type: 'ok' });
-                      setForm(f => ({ ...f, id: null, sum: '', note: '', cat: '', files: [], photoUrl: '', date: getToday() }));
-                      loadHistory(localStorage.getItem('cash_user'), user.name);
-                    } else {
-                      throw new Error('Server error');
-                    }
-                } catch (err) { 
-                  setMsg({ text: 'Ошибка отправки: проверьте интернет', type: 'err' }); 
-                }
+                    await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', body: JSON.stringify(payload) });
+                    setMsg({ text: 'Успешно!', type: 'ok' });
+                    setForm(f => ({ ...f, id: null, sum: '', note: '', cat: '', files: [], photoUrl: '', date: getToday() }));
+                    loadHistory();
+                } catch (err) { setMsg({ text: 'Ошибка сети', type: 'err' }); }
                 setIsSubmitting(false);
             };
 
             const edit = (tx) => {
                 const [d, m, y] = tx.date.split('.');
-                setForm({ 
-                  ...form, 
-                  id: tx.id, 
-                  date: `20${y}-${m}-${d}`, 
-                  type: tx.amount < 0 ? 'Расход' : 'Приход', 
-                  pay: tx.paymentMethod, 
-                  cat: tx.category, 
-                  sum: Math.abs(tx.amount), 
-                  note: tx.comment, 
-                  photoUrl: tx.photoUrl, 
-                  files: [] 
-                });
+                setForm({ ...form, id: tx.id, date: `20${y}-${m}-${d}`, type: tx.amount < 0 ? 'Расход' : 'Приход', pay: tx.paymentMethod, cat: tx.category, sum: Math.abs(tx.amount), note: tx.comment, photoUrl: tx.photoUrl, files: [] });
                 window.scrollTo({ top: 0, behavior: 'smooth' });
-                setMsg({ text: 'Режим редактирования', type: 'err' });
+                setMsg({ text: 'Режим правки', type: 'err' });
             };
 
-            if (isLoading) return <div className="h-screen flex items-center justify-center font-bold text-slate-300 loading-pulse uppercase">Загрузка...</div>;
+            if (isLoading) return <div className="h-screen flex items-center justify-center font-black text-slate-300 loading-pulse">ЗАГРУЗКА...</div>;
 
             if (!user) return (
-                <div className="min-h-screen flex items-center justify-center p-6">
-                    <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl border border-slate-100">
-                        <h1 className="text-2xl font-black text-center mb-8 uppercase tracking-tighter text-slate-800">Вход в систему</h1>
+                <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
+                    <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-2xl">
+                        <h1 className="text-2xl font-black text-center mb-8 uppercase text-slate-800">Касса</h1>
                         <form onSubmit={handleLogin} className="space-y-4">
-                            <select className="w-full p-4 border rounded-2xl outline-none bg-slate-50 font-bold" onChange={e => setLogin({...login, id: e.target.value})}>
-                                <option value="">Сотрудник...</option>
+                            <select className="w-full p-4 border rounded-2xl outline-none font-bold bg-slate-50" onChange={e => setLogin({...login, id: e.target.value})}>
+                                <option value="">Выберите сотрудника</option>
                                 {Object.entries(USERS).map(([k,v]) => <option key={k} value={k}>{v.name}</option>)}
                             </select>
                             <input type="password" placeholder="Пароль" className="w-full p-4 border rounded-2xl outline-none bg-slate-50" onChange={e => setLogin({...login, pass: e.target.value})} />
-                            <button className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg uppercase tracking-widest text-sm">Войти</button>
+                            <button className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg uppercase tracking-widest">Войти</button>
                         </form>
                     </div>
                 </div>
             );
 
             return (
-                <div className="max-w-6xl mx-auto p-4 md:p-10">
-                    <div className="flex justify-between items-center mb-8">
+                <div className="max-w-7xl mx-auto p-4 md:p-10">
+                    {/* Шапка с балансами */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                         <div className="flex items-center gap-4">
-                            <div className="bg-white p-1 rounded-xl shadow-sm border h-14 w-14 flex items-center justify-center"><img src={LOGOS[form.company]} className="max-h-full object-contain" /></div>
-                            <div><h1 className="text-xl font-black uppercase leading-none text-slate-800">Касса</h1><p className="text-[10px] text-slate-400 font-black uppercase mt-1 tracking-widest">{user.name}</p></div>
+                            <div className="bg-white p-2 rounded-xl border h-14 w-14 flex items-center justify-center shadow-sm">
+                                <img src={LOGOS[form.company] || LOGOS["Kedress"]} className="max-h-full object-contain" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-black uppercase text-slate-800 leading-none tracking-tighter">Финансы</h1>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{user.name}</p>
+                            </div>
                         </div>
-                        <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-[10px] font-black text-slate-300 hover:text-red-500 uppercase tracking-widest transition-colors">Выход</button>
+
+                        <div className="flex flex-wrap gap-2">
+                            {(user.name === "Прокофьева Н.В." || user.name === "Долматов Ю. М.") && (
+                                <div className="bg-white px-4 py-2 rounded-2xl border border-blue-50 shadow-sm">
+                                    <p className="text-[8px] font-black text-slate-400 uppercase">Остаток Прокофьева</p>
+                                    <p className="text-sm font-black text-blue-600">{calculatedBalances["Прокофьева Н.В."].toLocaleString('ru-RU')} ₽</p>
+                                </div>
+                            )}
+                            {(user.name === "Горбунов В. С." || user.name === "Долматов Ю. М.") && (
+                                <div className="bg-white px-4 py-2 rounded-2xl border border-blue-50 shadow-sm">
+                                    <p className="text-[8px] font-black text-slate-400 uppercase">Остаток Горбунов</p>
+                                    <p className="text-sm font-black text-blue-600">{calculatedBalances["Горбунов В. С."].toLocaleString('ru-RU')} ₽</p>
+                                </div>
+                            )}
+                            <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-[10px] font-black text-slate-300 hover:text-red-500 uppercase px-2 transition-colors">Выход</button>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-                        <form onSubmit={onSubmit} className="lg:col-span-5 bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4">
-                            <div className="flex justify-between items-center px-1">
-                                <input type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} className="bg-slate-100 p-2 rounded-xl font-bold text-xs outline-none" />
-                                {form.id && <span className="bg-amber-100 text-amber-600 text-[9px] font-black px-3 py-1 rounded-full uppercase animate-pulse">Правка</span>}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2">
-                                {['Приход', 'Расход'].map(t => <button key={t} type="button" onClick={() => setForm({...form, type: t})} className={`py-3 rounded-2xl font-black text-xs transition-all border-2 ${form.type===t ? (t==='Приход'?'bg-green-50 border-green-500 text-green-700':'bg-red-50 border-red-500 text-red-700') : 'border-slate-50 text-slate-300'}`}>{t.toUpperCase()}</button>)}
-                            </div>
-
-                            <div className="bg-slate-100 p-1 rounded-2xl grid grid-cols-2 gap-1">
-                                {['Наличные', 'Карта банка'].map(p => <button key={p} type="button" onClick={() => setForm({...form, pay: p})} className={`py-2 rounded-xl text-[9px] font-black uppercase transition-all ${form.pay===p ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>{p}</button>)}
-                            </div>
-
-                            <div className="space-y-3">
-                                <select value={form.company} onChange={e => { localStorage.setItem('cash_comp', e.target.value); setForm({...form, company: e.target.value, cat: ''}); }} className="w-full p-3 border border-slate-100 rounded-xl font-bold text-sm outline-none bg-white" disabled={user.companies.length===1}>
-                                    {user.companies.map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
-                                <select value={form.cat} onChange={e => setForm({...form, cat: e.target.value})} className="w-full p-3 border border-slate-100 rounded-xl text-sm outline-none bg-white font-medium text-slate-600">
-                                    <option value="">Статья расходов...</option>
-                                    {CATEGORIES[form.company]?.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                </select>
-                                <div className="relative">
-                                    <input type="number" value={form.sum} onChange={e => setForm({...form, sum: e.target.value})} placeholder="0.00" className="w-full p-3 border border-slate-100 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-black text-xl" />
-                                    <span className="absolute right-4 top-3.5 font-black text-slate-200 text-xl">₽</span>
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        {/* Левая колонка: Форма */}
+                        <div className="lg:col-span-4">
+                            <form onSubmit={onSubmit} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm space-y-4 sticky top-6">
+                                <div className="flex justify-between items-center px-1">
+                                    <input type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} className="bg-slate-50 p-2 rounded-xl font-bold text-xs outline-none" />
+                                    {form.id && <span className="bg-amber-100 text-amber-600 text-[9px] font-black px-3 py-1 rounded-full uppercase animate-pulse">Правка</span>}
                                 </div>
-                                <textarea value={form.note} onChange={e => setForm({...form, note: e.target.value})} placeholder="Комментарий..." className="w-full p-3 border border-slate-100 rounded-xl h-24 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium"></textarea>
-                                
-                                <label className="flex items-center justify-center p-4 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
-                                    <div className="flex flex-col items-center gap-1">
-                                        <span className="text-[10px] text-slate-400 font-black uppercase text-center">
-                                            {form.files.length > 0 ? `📎 Выбрано файлов: ${form.files.length}` : (form.photoUrl && form.photoUrl !== "Без фото" ? '📎 Файлы сохранены (нажмите для замены)' : '📎 Прикрепить чеки или PDF')}
-                                        </span>
-                                        <span className="text-[8px] text-slate-300 font-bold uppercase tracking-wider">(можно несколько разных типов)</span>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                    {['Приход', 'Расход'].map(t => <button key={t} type="button" onClick={() => setForm({...form, type: t})} className={`py-3 rounded-2xl font-black text-xs transition-all border-2 ${form.type===t ? (t==='Приход'?'bg-green-50 border-green-500 text-green-700':'bg-red-50 border-red-500 text-red-700') : 'border-slate-50 text-slate-300'}`}>{t.toUpperCase()}</button>)}
+                                </div>
+
+                                <div className="bg-slate-100 p-1 rounded-2xl grid grid-cols-2 gap-1">
+                                    {['Наличные', 'Карта банка'].map(p => <button key={p} type="button" onClick={() => setForm({...form, pay: p})} className={`py-2 rounded-xl text-[9px] font-black uppercase transition-all ${form.pay===p ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}>{p}</button>)}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <select value={form.company} onChange={e => setForm({...form, company: e.target.value, cat: ''})} className="w-full p-3 border border-slate-100 rounded-xl font-bold text-sm outline-none bg-white">
+                                        {user.companies.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <select value={form.cat} onChange={e => setForm({...form, cat: e.target.value})} className="w-full p-3 border border-slate-100 rounded-xl text-sm outline-none bg-white">
+                                        <option value="">Статья...</option>
+                                        {CATEGORIES[form.company]?.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                    </select>
+                                    <div className="relative">
+                                        <input type="number" value={form.sum} onChange={e => setForm({...form, sum: e.target.value})} placeholder="0.00" className="w-full p-3 border border-slate-100 rounded-xl outline-none font-black text-xl" />
+                                        <span className="absolute right-4 top-3.5 font-black text-slate-200 text-xl">₽</span>
                                     </div>
-                                    {/* Убрали ограничение accept="image/*", теперь можно PDF и всё остальное */}
-                                    <input type="file" multiple className="hidden" onChange={handleFile} />
-                                </label>
+                                    <textarea value={form.note} onChange={e => setForm({...form, note: e.target.value})} placeholder="Назначение платежа..." className="w-full p-3 border border-slate-100 rounded-xl h-24 outline-none text-sm resize-none"></textarea>
+                                    
+                                    <label className="flex items-center justify-center p-4 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
+                                        <span className="text-[10px] text-slate-400 font-black uppercase text-center">
+                                            {form.files.length > 0 ? `📎 Файлов: ${form.files.length}` : (form.photoUrl && form.photoUrl !== "Без фото" ? '📎 Файлы сохранены' : '📷 Прикрепить фото/PDF')}
+                                        </span>
+                                        <input type="file" multiple className="hidden" onChange={handleFile} />
+                                    </label>
+                                </div>
+
+                                {msg.text && <p className={`text-[10px] font-black uppercase text-center p-2 rounded-lg ${msg.type==='ok'?'text-green-600 bg-green-50':'text-amber-600 bg-amber-50'}`}>{msg.text}</p>}
+
+                                <button disabled={isSubmitting} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl hover:bg-black transition-all disabled:opacity-50 shadow-xl uppercase tracking-tighter">
+                                    {isSubmitting ? 'ЗАГРУЗКА...' : (form.id ? 'ОБНОВИТЬ' : 'СОХРАНИТЬ')}
+                                </button>
+                            </form>
+                        </div>
+
+                        {/* Правая колонка: Вкладки по месяцам и Лента */}
+                        <div className="lg:col-span-8 flex flex-col md:flex-row gap-6">
+                            {/* Боковая панель месяцев */}
+                            <div className="md:w-32 flex md:flex-col overflow-x-auto md:overflow-x-visible gap-2 pb-2 md:pb-0 custom-scrollbar shrink-0">
+                                <p className="hidden md:block text-[9px] font-black text-slate-300 uppercase tracking-widest mb-2 px-2">Период</p>
+                                {monthTabs.map(m => (
+                                    <button 
+                                        key={m} 
+                                        onClick={() => setSelectedMonth(m)}
+                                        className={`px-4 py-3 rounded-2xl border text-[10px] font-black transition-all whitespace-nowrap ${selectedMonth === m ? 'active-tab' : 'bg-transparent border-transparent text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        {m}
+                                    </button>
+                                ))}
                             </div>
 
-                            {msg.text && <p className={`text-[10px] font-black uppercase text-center p-2 rounded-lg ${msg.type==='ok'?'text-green-600 bg-green-50':'text-amber-600 bg-amber-50'}`}>{msg.text}</p>}
-
-                            <button disabled={isSubmitting} className="w-full py-4 bg-slate-900 text-white font-black rounded-2xl hover:bg-black transition-all disabled:opacity-50 shadow-xl text-lg tracking-tighter uppercase">
-                                {isSubmitting ? 'Загрузка...' : (form.id ? 'Обновить данные' : 'Записать в таблицу')}
-                            </button>
-                        </form>
-
-                        <div className="lg:col-span-7 space-y-4">
-                            <div className="flex justify-between items-center px-1">
-                                <h2 className="font-black text-[10px] text-slate-300 uppercase tracking-widest">Лента за месяц</h2>
-                                {isSyncing && <div className="text-[9px] font-black text-blue-400 loading-pulse uppercase">Синхронизация...</div>}
-                            </div>
-                            <div className="space-y-4 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
-                                {history.map(tx => (
-                                    <div key={tx.id} className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex justify-between items-start hover:border-blue-200 transition-all">
+                            {/* Лента операций */}
+                            <div className="flex-1 space-y-4 max-h-[850px] overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="flex justify-between items-center px-1 sticky top-0 bg-slate-50/80 backdrop-blur-sm py-2 z-10">
+                                    <h2 className="font-black text-[10px] text-slate-300 uppercase tracking-widest">Операции за {selectedMonth}</h2>
+                                    {isSyncing && <div className="text-[8px] font-black text-blue-400 loading-pulse uppercase">Обновление...</div>}
+                                </div>
+                                
+                                {currentList.map(tx => (
+                                    <div key={tx.id} className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-sm flex justify-between items-start hover:border-blue-100 transition-colors">
                                         <div className="space-y-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase ${tx.amount < 0 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>{tx.amount < 0 ? 'Расход' : 'Приход'}</span>
@@ -269,19 +322,18 @@
                                                 <span className="text-[8px] font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded uppercase">{tx.paymentMethod}</span>
                                             </div>
                                             <p className="font-black text-slate-800 text-2xl tracking-tighter">{Math.abs(tx.amount).toLocaleString('ru-RU')} ₽</p>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{tx.category}</p>
-                                            <div className="bg-slate-50 p-3 rounded-xl mt-3 border-l-4 border-slate-200"><p className="text-[13px] text-slate-600 italic font-medium">"{tx.comment}"</p></div>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
+                                                {tx.category} {user.name === "Долматов Ю. М." && <span className="text-blue-300 ml-1">| {tx.employeeName}</span>}
+                                            </p>
+                                            <div className="bg-slate-50 p-3 rounded-xl mt-3 border-l-4 border-slate-200">
+                                                <p className="text-[13px] text-slate-600 italic leading-relaxed font-medium">"{tx.comment}"</p>
+                                            </div>
                                             
                                             {tx.photoUrl && tx.photoUrl !== "Без фото" && (
-                                                <div className="flex flex-wrap gap-2 mt-2">
-                                                    {tx.photoUrl.split(',').map((url, idx) => {
-                                                        const isPdf = url.toLowerCase().includes('.pdf') || url.includes('drive.google.com'); // Упрощенная проверка
-                                                        return (
-                                                            <a key={idx} href={url.trim()} target="_blank" rel="noopener noreferrer" className="inline-block text-[9px] font-black text-blue-400 uppercase bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
-                                                                📎 {isPdf ? 'Файл' : 'Чек'} {idx + 1}
-                                                            </a>
-                                                        );
-                                                    })}
+                                                <div className="flex flex-wrap gap-2 mt-3">
+                                                    {tx.photoUrl.split(',').map((url, idx) => (
+                                                        <a key={idx} href={url.trim()} target="_blank" rel="noopener noreferrer" className="inline-block text-[9px] font-black text-blue-500 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors uppercase">📎 Файл {idx + 1}</a>
+                                                    ))}
                                                 </div>
                                             )}
                                         </div>
@@ -290,7 +342,7 @@
                                         </button>
                                     </div>
                                 ))}
-                                {history.length === 0 && !isSyncing && <div className="text-center py-20 text-slate-200 font-bold uppercase text-xs">Записей нет</div>}
+                                {currentList.length === 0 && !isSyncing && <div className="text-center py-20 text-slate-200 font-black uppercase text-xs">Записей нет</div>}
                             </div>
                         </div>
                     </div>
