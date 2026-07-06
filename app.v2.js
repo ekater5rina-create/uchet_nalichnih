@@ -7,12 +7,14 @@ const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyJdXBKq_CqyA
 const INITIAL_BALANCES = {
   "Прокофьева Н.В.": 109220.64,
   "Горбунов В. С.": -92098.0,
-  "Залазаев В.В.": 14643.21
+  "Залазаев В.В.": 14643.21,
+  "Иванов И.Н.": 50000.0
 };
 const CUTOFF_DATES = {
   "Прокофьева Н.В.": new Date(2026, 3, 30),
   "Горбунов В. С.": new Date(2026, 3, 30),
-  "Залазаев В.В.": new Date(2026, 0, 1)
+  "Залазаев В.В.": new Date(2026, 0, 1),
+  "Иванов И.Н.": new Date(2026, 0, 1)
 };
 const USERS = {
   dmitriev: {
@@ -24,6 +26,11 @@ const USERS = {
     password: "ZVV",
     name: "Залазаев В.В.",
     companies: ["Палладиум"]
+  },
+  ivanov: {
+    password: "IIN",
+    name: "Иванов И.Н.",
+    companies: ["Kedress", "Палладиум"]
   },
   kuzina: {
     password: "KEA",
@@ -164,7 +171,8 @@ function App() {
     return {
       "Прокофьева Н.В.": calculateFor("Прокофьева Н.В."),
       "Горбунов В. С.": calculateFor("Горбунов В. С."),
-      "Залазаев В.В.": calculateFor("Залазаев В.В.")
+      "Залазаев В.В.": calculateFor("Залазаев В.В."),
+      "Иванов И.Н.": calculateFor("Иванов И.Н.")
     };
   }, [history]);
   const monthTabs = useMemo(() => {
@@ -207,6 +215,10 @@ function App() {
       key: "Залазаев В.В.",
       label: "Остаток Залазаев",
       show: user.name === "Залазаев В.В." || user.name === "Долматов Ю. М."
+    }, {
+      key: "Иванов И.Н.",
+      label: "Остаток Иванов",
+      show: user.name === "Иванов И.Н." || user.name === "Долматов Ю. М."
     }].filter(item => item.show);
   }, [user]);
   const logoCompany = form.company || user?.companies?.[0] || "Kedress";
