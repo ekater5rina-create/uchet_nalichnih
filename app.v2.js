@@ -30,7 +30,7 @@ const USERS = {
   ivanov: {
     password: "IIN",
     name: "Иванов И.Н.",
-    companies: ["Kedress", "Палладиум"]
+    companies: ["Палладиум"]
   },
   kuzina: {
     password: "KEA",
